@@ -1,0 +1,240 @@
+---
+title: "RRBS"
+author: "Joselynn"
+date: "2/24/2020"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE}
+library(biomaRt)
+#library(DSS)
+library(bsseq)
+library(dplyr)
+#library(AnnotationDbi)
+library(GenomicRanges)
+#library(clusterProfiler)
+#library(methyAnalysis)
+#library(DESeq2)
+library(edgeR)
+library(PCAtools)
+```
+
+
+
+#within additive effects, just compre within levels because the LRT tells us there isn't an interaction betw hormone and additive for the most part -- hormone effects and additive effects are separate.
+#In the situations (~3k) where is does matter, this is where the interaction terms should be used/contrasts made..
+
+# first thing - combine control_additive, run LRT w interaction term and get the ~47K where additive is better model.
+# Filter the other 3000, get the positions and see how many actually fall in genes or TSS, if none of them are in locations of interest then just 
+# then contrasts only on the main effects -- so estrogen or additive only, within factor
+# so look at vehicle vs nothing, if that isn't significant then proceed w keeping additive as 'nothing'.
+
+```{r}
+#combine control and additive to represetnt that the negative controls are  different, is there a different betw. vehicle and nothing, so on ans so forth
+
+#read in a targets file explaining all the samples, their features (e.g. treatments, genotypes, etc), and the file names.
+targets <- read.table('targets.txt', sep = '\t', header = T)
+targets_2 <- read.table('targets_2.txt', sep = '\t', header = T) #targets and targets_2 change additive and control factors
+#import those files using readBismark2DGE
+files <- targets$file
+yall <- readBismark2DGE(files, sample.names=targets$sample)
+
+#filter to include only some chromosomes and sort them.
+yall <- yall[yall$genes[,'Chr'] == 1 | yall$genes[,'Chr'] == 2| yall$genes[,'Chr'] == 3| yall$genes[,'Chr'] == 4| yall$genes[,'Chr'] == 5| yall$genes[,'Chr'] == 6| yall$genes[,'Chr'] == 7| yall$genes[,'Chr'] == 8| yall$genes[,'Chr'] == 9| yall$genes[,'Chr'] == 10| yall$genes[,'Chr'] == 11| yall$genes[,'Chr'] == 12| yall$genes[,'Chr'] == 13| yall$genes[,'Chr'] == 14| yall$genes[,'Chr'] == 15| yall$genes[,'Chr'] == 16| yall$genes[,'Chr'] == 17| yall$genes[,'Chr'] == 18| yall$genes[,'Chr'] == 19| yall$genes[,'Chr'] == 'X',]
+sort_order <- c(1:19, 'X') 
+yall$genes$Chr <- factor(yall$genes$Chr, levels=sort_order)
+o <- order(yall$genes$Chr, yall$genes$Locus)
+yall <- yall[o,]
+table(yall$genes$Chr)
+
+#add info about nearest TSS
+TSS <- nearestTSS(yall$genes$Chr,yall$genes$Locus, species="Mm")
+yall$genes$EntrezID <- TSS$gene_id
+yall$genes$Symbol <- TSS$symbol
+yall$genes$Strand <- TSS$strand
+yall$genes$Distance <- TSS$distance
+yall$genes$Width <- TSS$width
+
+#make factor levels of Me and Un repeated along the length of the columns
+Methylation <- gl(2,1,ncol(yall), labels=c("Me","Un"))
+Me <- yall$counts[, Methylation=="Me"]
+Un <- yall$counts[, Methylation=="Un"]
+
+#combine methylated and unmethylated reads to get total coverage
+Coverage <- Me + Un
+
+#Get a list of CpGs with at least 60 counts (methylated and unmethylated) in at least 3 samples
+HasCoverage <- rowSums(Coverage >= 60) == 3
+
+#List of CpGs that are not 0 both
+HasBoth <- rowSums(Me) > 0 & rowSums(Un) > 0
+
+#apply those coverage filters
+y <- yall[HasCoverage & HasBoth,, keep.lib.sizes=FALSE]
+
+#assign library sizes to each sample to be a sum of methylated and unmethylated counts
+TotalLibSize <- y$samples$lib.size[Methylation=="Me"] + y$samples$lib.size[Methylation=="Un"]
+y$samples$lib.size <- rep(TotalLibSize, each=2)
+
+#make some factors for design matrix..
+Methylation <- gl(2,1,ncol(yall), labels=c("Me","Un"))
+
+```
+
+########using the 'targets_2' design where vehicle and nothing are both in the 'none' category for additive.
+
+```{r}
+targets_2$additive <- relevel(as.factor(targets_2$additive), ref = 'none')
+targets_2$hormone <- relevel(as.factor(targets_2$hormone), ref = 'noestrogen')
+
+design <- modelMatrixMeth(model.matrix(~ hormone * additive, data=targets_2))
+
+y_mm <- estimateDisp(y, design=design, trend="none")
+full_fit_mm <- glmFit(y_mm, design)
+#now we have: the samples, the intercept or the grand mean, the talc, titanium, vehicle, and hormone main effects, and the interaction.
+
+colnames(full_fit_mm$coefficients)
+# `additivetalc and additivetitanium are the talc and titanium effects -- I think they more like the talc affect across both estrogen and noestrogen samples, rather than looking at the talc and titanium effects at the 'reference' level for estrogen factor (e.g., no estrogen)
+#hormoneestrogen is the estrogen effect -- e.g. comparing all estrogen vs no estrogen samples, regardless of additive
+#additivetalc:hormoneestrogen is basically the differences of differences -- so (talc:estrogen - nothing:estrogen) - (talc:noestrogen - vehicle:noestrogen)
+#additivetitanium:hormoneestrogen is similar -- (titanium:estrogen - nothing:estrogen) - (titanium:noestrogen - vehicle:noestrogen)
+```
+
+```{r}
+#first - where do the interactions matter?
+lrt_interaction_mm <- glmLRT(full_fit_mm, coef = c('additivetalc:hormoneestrogen', 'additivetitanium:hormoneestrogen'))
+                             #filter based on p-value, don't bother w test correction for now, cut off at .001 - table(lrt_interaction_mm$table$PValue > 0.01)
+
+table(lrt_interaction_mm$table$PValue > 0.01) #using a more stringent nominal p-value cutoff, we can see for ~40K loci an additive model is a better fit, while ~1300 loci have an interaction betw. hormone and additive.
+
+#add some adjusted p-values
+lrt_interaction_mm$table$BH <- p.adjust(lrt_interaction_mm$table$PValue, method = "BH")
+lrt_interaction_mm$table$bonferroni <- p.adjust(lrt_interaction_mm$table$PValue, method = "bonferroni")
+
+# second - run a contrast comparing talc and titanium effects across hormone
+lrt_talc <- glmLRT(full_fit_mm, coef = "additivetalc")
+lrt_titanium <- glmLRT(full_fit_mm, coef = "additivetitanium")
+
+lrt_talc$table$BH <- p.adjust(lrt_talc$table$PValue, method = "BH")
+lrt_talc$table$bonferroni <- p.adjust(lrt_talc$table$PValue, method = "bonferroni")
+
+lrt_titanium$table$BH <- p.adjust(lrt_titanium$table$PValue, method = "BH")
+lrt_titanium$table$bonferroni <- p.adjust(lrt_titanium$table$PValue, method = "bonferroni")
+
+#loci where interactions are not as important
+additive_genes <- lrt_interaction_mm[lrt_interaction_mm$table$PValue > 0.01,]
+#loci where interactions are important
+interaction_genes <- lrt_interaction_mm[lrt_interaction_mm$table$PValue < 0.01,]
+
+#filter so only genes with additive effect are included in the 'main' effects tables...
+talc_effect <- lrt_talc[rownames(lrt_talc$genes) %in% rownames(additive_genes$genes),]
+titanium_effect <- lrt_titanium[rownames(lrt_titanium$genes) %in% rownames(additive_genes$genes),]
+
+
+#what about the interactions?
+lrt_talc_interaction <- glmLRT(full_fit_mm, coef = "additivetalc:hormoneestrogen")
+lrt_titanium_interaction <- glmLRT(full_fit_mm, coef = "additivetitanium:hormoneestrogen")
+
+#add adjusted p-values...
+lrt_talc_interaction$table$BH <- p.adjust(lrt_talc_interaction$table$PValue, method = "BH")
+lrt_talc_interaction$table$bonferroni <- p.adjust(lrt_talc_interaction$table$PValue, method = "bonferroni")
+
+lrt_titanium_interaction$table$BH <- p.adjust(lrt_titanium_interaction$table$PValue, method = "BH")
+lrt_titanium_interaction$table$bonferroni <- p.adjust(lrt_titanium_interaction$table$PValue, method = "bonferroni")
+
+#filter so only genes with interaction effects are included...
+talc_effect_interaction <- lrt_talc_interaction[rownames(lrt_talc_interaction$genes) %in% rownames(interaction_genes$genes),]
+titanium_effect_interaction <- lrt_titanium_interaction[rownames(lrt_titanium_interaction$genes) %in% rownames(interaction_genes$genes),]
+
+
+#should have the same # of genes...43704
+nrow(additive_genes$genes)
+nrow(talc_effect$genes)
+nrow(titanium_effect$genes)
+nrow(interaction_genes$genes)
+nrow(talc_effect_interaction$genes)
+nrow(titanium_effect_interaction$genes)
+
+talc_output <- left_join(
+  tibble::rownames_to_column(talc_effect$table, var = 'rowname'), 
+  tibble::rownames_to_column(talc_effect$genes, var = 'rowname')) 
+
+titanium_output <- left_join(
+  tibble::rownames_to_column(titanium_effect$table, var = 'rowname'), 
+  tibble::rownames_to_column(titanium_effect$genes, var = 'rowname'))
+
+talc_output_interaction <- left_join(
+  tibble::rownames_to_column(talc_effect_interaction$table, var = 'rowname'), 
+  tibble::rownames_to_column(talc_effect_interaction$genes, var = 'rowname')) 
+
+titanium_output_interaction <- left_join(
+  tibble::rownames_to_column(titanium_effect_interaction$table, var = 'rowname'), 
+  tibble::rownames_to_column(titanium_effect_interaction$genes, var = 'rowname'))
+
+#add the counts data to get relative methylation heatmaps...
+talc_output_counts <- left_join(
+  talc_output,
+  tibble::rownames_to_column(as.data.frame(y$counts), var = 'rowname')) 
+
+titanium_output_counts <- left_join(
+  titanium_output,
+  tibble::rownames_to_column(as.data.frame(y$counts), var = 'rowname')) 
+
+talc_output_interaction_counts <- left_join(
+  talc_output_interaction,
+  tibble::rownames_to_column(as.data.frame(y$counts), var = 'rowname')) 
+
+titanium_output_interaction_counts <- left_join(
+  titanium_output_interaction,
+  tibble::rownames_to_column(as.data.frame(y$counts), var = 'rowname')) 
+
+#look at the results...
+table(titanium_output_counts$PValue < 0.01) #1137 DML in titanium
+table(talc_output_counts$PValue < 0.01) #767 DML in talc
+
+table(titanium_output_interaction_counts$PValue < 0.01) #724 DML in titanium accounting for estrogen
+table(talc_output_interaction_counts$PValue < 0.01) #565 DML in talc accounting for estrogen
+```
+
+
+##############################
+# look at vehicle vs none -- is there a difference betw these two controls? 
+##############################
+
+
+```{r}
+
+targets$additive <- relevel(as.factor(targets$additive), ref = 'nothing')
+targets$hormone <- relevel(as.factor(targets$hormone), ref = 'noestrogen')
+
+design_2 <- modelMatrixMeth(model.matrix(~ additive * hormone, data=targets))
+
+#control_disp <- estimateDisp(y, design=design_2, trend="none") #Design matrix not of full rank.
+
+design_2 <- design_2[, colnames(design_2) != "additivevehicle:hormoneestrogen"] # getting rid of the unestimable coefficients
+design_2 <- design_2[, colnames(design_2) != "additivetitanium:hormoneestrogen"] # getting rid of the unestimable coefficients
+control_disp <- estimateDisp(y, design=design_2, trend="none")
+control_fit <- glmFit(control_disp, design_2)
+```
+```{r}
+print(design_2[,19:24])
+```
+```{r}
+controls_contrast <- makeContrasts(vehicle_vs_nothing = (additivevehicle - (hormoneestrogen - additivetalc - additivetitanium)), levels = make.names(colnames(design_2)))
+controls_contrast
+```
+
+#is this right?
+
+```{r}
+
+controls_contrast_pr <- glmLRT(control_fit, contrast = controls_contrast)
+
+#when pvalue is less than a cutoff (.05 or whatever) these are the genes or loci where there's a difference betw the 'nothing' and 'vehicle' additive... 
+controls_contrast_pr$table$BH <- p.adjust(controls_contrast_pr$table$PValue, method = "BH")
+controls_contrast_pr$table$bonferroni <- p.adjust(controls_contrast_pr$table$PValue, method = "bonferroni")
+
+hist(controls_contrast_pr$table$PValue)
+```
+
+
