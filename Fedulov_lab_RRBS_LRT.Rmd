@@ -5,7 +5,7 @@ date: "2/24/2020"
 output: html_document
 ---
 
-```{r message=FALSE, warning=FALSE}
+```{r, include = FALSE}
 library(biomaRt)
 #library(DSS)
 library(bsseq)
@@ -16,10 +16,11 @@ library(GenomicRanges)
 #library(methyAnalysis)
 #library(DESeq2)
 library(edgeR)
-library(PCAtools)
-```
+#library(PCAtools)
+library(openxlsx)
 
 
+# maybe also try running an additive model
 
 #within additive effects, just compre within levels because the LRT tells us there isn't an interaction betw hormone and additive for the most part -- hormone effects and additive effects are separate.
 #In the situations (~3k) where is does matter, this is where the interaction terms should be used/contrasts made..
@@ -29,15 +30,14 @@ library(PCAtools)
 # then contrasts only on the main effects -- so estrogen or additive only, within factor
 # so look at vehicle vs nothing, if that isn't significant then proceed w keeping additive as 'nothing'.
 
-```{r}
 #combine control and additive to represetnt that the negative controls are  different, is there a different betw. vehicle and nothing, so on ans so forth
 
 #read in a targets file explaining all the samples, their features (e.g. treatments, genotypes, etc), and the file names.
-targets <- read.table('targets.txt', sep = '\t', header = T)
+#targets <- read.table('targets.txt', sep = '\t', header = T)
 targets_2 <- read.table('targets_2.txt', sep = '\t', header = T) #targets and targets_2 change additive and control factors
 #import those files using readBismark2DGE
-files <- targets$file
-yall <- readBismark2DGE(files, sample.names=targets$sample)
+files <- targets_2$file
+yall <- readBismark2DGE(files, sample.names=targets_2$sample)
 
 #filter to include only some chromosomes and sort them.
 yall <- yall[yall$genes[,'Chr'] == 1 | yall$genes[,'Chr'] == 2| yall$genes[,'Chr'] == 3| yall$genes[,'Chr'] == 4| yall$genes[,'Chr'] == 5| yall$genes[,'Chr'] == 6| yall$genes[,'Chr'] == 7| yall$genes[,'Chr'] == 8| yall$genes[,'Chr'] == 9| yall$genes[,'Chr'] == 10| yall$genes[,'Chr'] == 11| yall$genes[,'Chr'] == 12| yall$genes[,'Chr'] == 13| yall$genes[,'Chr'] == 14| yall$genes[,'Chr'] == 15| yall$genes[,'Chr'] == 16| yall$genes[,'Chr'] == 17| yall$genes[,'Chr'] == 18| yall$genes[,'Chr'] == 19| yall$genes[,'Chr'] == 'X',]
@@ -49,11 +49,11 @@ table(yall$genes$Chr)
 
 #add info about nearest TSS
 TSS <- nearestTSS(yall$genes$Chr,yall$genes$Locus, species="Mm")
-yall$genes$EntrezID <- TSS$gene_id
-yall$genes$Symbol <- TSS$symbol
+yall$genes$EntrezID <- TSS$gene_id #gene entrez id
+yall$genes$Symbol <- TSS$symbol #gene symbol
 yall$genes$Strand <- TSS$strand
-yall$genes$Distance <- TSS$distance
-yall$genes$Width <- TSS$width
+yall$genes$Distance <- TSS$distance #integer vector giving distance to nearest TSS. Positive values means that the TSS is downstream of the locus, negative values means that it is upstream. Gene body loci will therefore have negative distances and promotor loci will have positive.
+yall$genes$Width <- TSS$width #genomic width of the gene
 
 #make factor levels of Me and Un repeated along the length of the columns
 Methylation <- gl(2,1,ncol(yall), labels=c("Me","Un"))
@@ -65,6 +65,7 @@ Coverage <- Me + Un
 
 #Get a list of CpGs with at least 60 counts (methylated and unmethylated) in at least 3 samples
 HasCoverage <- rowSums(Coverage >= 60) == 3
+#try lowering this threshold to get more 
 
 #List of CpGs that are not 0 both
 HasBoth <- rowSums(Me) > 0 & rowSums(Un) > 0
@@ -79,40 +80,698 @@ y$samples$lib.size <- rep(TotalLibSize, each=2)
 #make some factors for design matrix..
 Methylation <- gl(2,1,ncol(yall), labels=c("Me","Un"))
 
-```
-
 ########using the 'targets_2' design where vehicle and nothing are both in the 'none' category for additive.
 
+```
+
 ```{r}
-targets_2$additive <- relevel(as.factor(targets_2$additive), ref = 'none')
+#make some output tables for later..
+counts_and_genes <- inner_join(tibble::rownames_to_column(as.data.frame(y$counts), var = 'loci'), tibble::rownames_to_column(as.data.frame(y$genes), var = 'loci'))
+
+counts_and_genes$methylation_proportion_1 <- (counts_and_genes$'1-Me') / (counts_and_genes$'1-Me' + counts_and_genes$'1-Un')
+counts_and_genes$methylation_proportion_2 <- (counts_and_genes$'2-Me') / (counts_and_genes$'2-Me' + counts_and_genes$'2-Un')
+counts_and_genes$methylation_proportion_3 <- (counts_and_genes$'3-Me') / (counts_and_genes$'3-Me' + counts_and_genes$'3-Un')
+
+counts_and_genes$methylation_proportion_4 <- (counts_and_genes$'4-Me') / (counts_and_genes$'4-Me' + counts_and_genes$'4-Un')
+counts_and_genes$methylation_proportion_5 <- (counts_and_genes$'5-Me') / (counts_and_genes$'5-Me' + counts_and_genes$'5-Un')
+counts_and_genes$methylation_proportion_6 <- (counts_and_genes$'6-Me') / (counts_and_genes$'6-Me' + counts_and_genes$'6-Un')
+
+counts_and_genes$methylation_proportion_7 <- (counts_and_genes$'7-Me') / (counts_and_genes$'7-Me' + counts_and_genes$'7-Un')
+counts_and_genes$methylation_proportion_8 <- (counts_and_genes$'8-Me') / (counts_and_genes$'8-Me' + counts_and_genes$'8-Un')
+counts_and_genes$methylation_proportion_9 <- (counts_and_genes$'9-Me') / (counts_and_genes$'9-Me' + counts_and_genes$'9-Un')
+
+counts_and_genes$methylation_proportion_10 <- (counts_and_genes$'10-Me') / (counts_and_genes$'10-Me' + counts_and_genes$'10-Un')
+counts_and_genes$methylation_proportion_11 <- (counts_and_genes$'11-Me') / (counts_and_genes$'11-Me' + counts_and_genes$'11-Un')
+counts_and_genes$methylation_proportion_12 <- (counts_and_genes$'12-Me') / (counts_and_genes$'12-Me' + counts_and_genes$'12-Un')
+
+counts_and_genes$methylation_proportion_13 <- (counts_and_genes$'13-Me') / (counts_and_genes$'13-Me' + counts_and_genes$'13-Un')
+counts_and_genes$methylation_proportion_14 <- (counts_and_genes$'14-Me') / (counts_and_genes$'14-Me' + counts_and_genes$'14-Un')
+counts_and_genes$methylation_proportion_15 <- (counts_and_genes$'15-Me') / (counts_and_genes$'15-Me' + counts_and_genes$'15-Un')
+
+counts_and_genes$methylation_proportion_16 <- (counts_and_genes$'16-Me') / (counts_and_genes$'16-Me' + counts_and_genes$'16-Un')
+counts_and_genes$methylation_proportion_17 <- (counts_and_genes$'17-Me') / (counts_and_genes$'17-Me' + counts_and_genes$'17-Un')
+counts_and_genes$methylation_proportion_18 <- (counts_and_genes$'18-Me') / (counts_and_genes$'18-Me' + counts_and_genes$'18-Un')
+
+```
+run glmfit once w hormone * additive, run lrt, then re-run it and save the dispersions
+then re-run the 
+
+
+```{r}
+
+targets_2$treatment <- relevel(as.factor(targets_2$treatment), ref = 'none')
 targets_2$hormone <- relevel(as.factor(targets_2$hormone), ref = 'noestrogen')
+targets_2$group <- relevel(as.factor(targets_2$group), ref = 'noestrogen.none')
 
-design <- modelMatrixMeth(model.matrix(~ hormone * additive, data=targets_2))
+design <- modelMatrixMeth(model.matrix(~ hormone * treatment, data=targets_2))
+#design <- modelMatrixMeth(model.matrix(~0 + group, data = targets_2))
+```
 
-y_mm <- estimateDisp(y, design=design, trend="none")
-full_fit_mm <- glmFit(y_mm, design)
-#now we have: the samples, the intercept or the grand mean, the talc, titanium, vehicle, and hormone main effects, and the interaction.
+Comments on dispersion:
 
+"We estimate the NB dispersion for each CpG site using the estimateDisp function. The mean-dispersion relationship of BS-seq data has been studied in the past and no apparent mean-dispersion trend was observed [10]. Therefore, we would not consider a mean-dependent dispersion trend for BS-seq methylation data."
+
+This is why they use: estimateDisp(trend="none") as dispersion for glmLRT.
+
+For running glmQLFit, the documentation states:
+
+"The first is that the negative binomial dispersions must be trended or common values. This is because the function assumes that the supplied values are the true values. For the trended/common values, the assumption is reasonable as information from many genes improves precision. This is not the case for the tagwise dispersions due to the limited information for each gene."
+
+The documentation further states the following about the dispersion argument to glmQLFit:
+
+"numeric scalar, vector or matrix of negative binomial dispersions. If NULL, then will be extracted from the DGEList object y, with order of precedence: trended dispersions, common dispersion, a constant value of 0.05."
+
+If I try to run glmQLFit without a dispersion estimate, I get this error:
+"Error in glmQLFit.DGEList(y, design) : No dispersion values found in DGEList object."
+
+```{r}
+#create seaparate objects here for glmLRT and glmQLFit -- use y_disp for glmLRT, y for glmQLFit
+
+y_glm_disp <- estimateDisp(y, design=design,  trend="none")
+y_glm_fit <- glmFit(y_glm_disp, design)
+
+# If the p-values are less than 0.05, these are the loci where the interaction terms matter -- e.g., loci where Talc and Titanium are doing different things depending on whether or not there's estrogen present.
+interactions_glmLRT <- glmLRT(y_glm_fit, coef = c(23:24))
+
+interaction_loci <- tibble::rownames_to_column(data.frame(interactions_glmLRT$table), var = 'loci') %>% dplyr::filter(PValue < 0.02) # 4610 loci
+additive_loci <- tibble::rownames_to_column(data.frame(interactions_glmLRT$table), var = 'loci') %>% dplyr::filter(PValue > 0.02) #40447 loci
+```
+
+```{r}
+
+#These contrasts apply where interactions don't matter.
+#That means I should filter these  results tables so that they do not include any of the 4610 loci where interactions matter.
+
+# These three are basically looking at the estrogen effects in talc, titanium, or none/no treatment.
+
+#none.noestrogen - none.estrogen
+nothing_across_estrogen <- glmLRT(y_glm_fit, contrast = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0))
+
+#talc.noestrogen - talc.estrogen
+talc_across_estrogen <- glmLRT(y_glm_fit, contrast = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, -1, 0))
+
+#titanium.noestrogen - titanium.estrogen
+titanium_across_estrogen <- glmLRT(y_glm_fit, contrast = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, -1))
+
+
+# These contrasts apply where interactions don't matter.
+# These are looking at the effect of talc or titanium in estrogen or in noestrogen:
+
+#none.estrogen - talc.estrogen
+talc_within_estrogen <- glmLRT(y_glm_fit, contrast = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, -1, 0))
+
+#none.estrogen - titanium.estrogen
+titanium_within_estrogen <- glmLRT(y_glm_fit, contrast = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, -1))
+
+#none.noestrogen - talc.noestrogen
+talc_within_noestrogen <- glmLRT(y_glm_fit, contrast = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0))
+
+#none.noestrogen - titanium.noestrogen
+titanium_within_noestrogen <- glmLRT(y_glm_fit, contrast = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0))
+```
+
+```{r}
+#These contrasts apply where interactions matter.
+#These contrasts only make sense when we expect that talc and titanium are doing different things in estrogen and no estrogen.
+
+#(none.estrogen - talc.estrogen) - (none.noestrogen - talc.noestrogen)
+talc_within_estrogen_VS_talc_within_no_estrogen <- glmLRT(y_glm_fit, contrast = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0))
+
+#(none.estrogen - titanium.estrogen) - (none.noestrogen - titanium.noestrogen)
+titanium_within_estrogen_VS_titanium_within_no_estrogen <- glmLRT(y_glm_fit, contrast = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1))
+
+
+```
+
+
+```{r}
+nothing_across_estrogen$comparison #"-1*hormoneestrogen"
+talc_across_estrogen$comparison #-1*hormoneestrogen -1*hormoneestrogen:treatmenttalc"
+titanium_across_estrogen$comparison #"-1*hormoneestrogen -1*hormoneestrogen:treatmenttitanium"
+
+talc_within_estrogen$comparison #-1*treatmenttalc -1*hormoneestrogen:treatmenttalc"
+talc_within_noestrogen$comparison #"-1*treatmenttalc"
+
+titanium_within_estrogen$comparison #"-1*treatmenttitanium -1*hormoneestrogen:treatmenttitanium"
+titanium_within_noestrogen$comparison #"-1*treatmenttitanium"
+
+talc_within_estrogen_VS_talc_within_no_estrogen$comparison #"-1*hormoneestrogen:treatmenttalc"
+titanium_within_estrogen_VS_titanium_within_no_estrogen$comparison #"-1*hormoneestrogen:treatmenttitanium"
+
+```
+
+
+
+# Add corrected p-value columns.
+
+```{r}
+nothing_across_estrogen$table$BH <- p.adjust(nothing_across_estrogen$table$PValue, method = "BH")
+talc_across_estrogen$table$BH <- p.adjust(talc_across_estrogen$table$PValue, method = "BH")
+titanium_across_estrogen$table$BH <-p.adjust(titanium_across_estrogen$table$PValue, method = "BH")
+
+talc_within_estrogen$table$BH <- p.adjust(talc_within_estrogen$table$PValue, method = "BH")
+titanium_within_estrogen$table$BH <- p.adjust(titanium_within_estrogen$table$PValue, method = "BH")
+
+talc_within_noestrogen$table$BH <- p.adjust(talc_within_noestrogen$table$PValue, method = "BH")
+titanium_within_noestrogen$table$BH <- p.adjust(titanium_within_noestrogen$table$PValue, method = "BH")
+
+talc_within_estrogen_VS_talc_within_no_estrogen$table$BH <- p.adjust(talc_within_estrogen_VS_talc_within_no_estrogen$table$PValue, method = "BH")
+titanium_within_estrogen_VS_titanium_within_no_estrogen$table$BH <- p.adjust(titanium_within_estrogen_VS_titanium_within_no_estrogen$table$PValue, method = "BH")
+```
+
+```{r}
+nothing_across_estrogen$table$bonferroni <- p.adjust(nothing_across_estrogen$table$PValue, method = "bonferroni")
+talc_across_estrogen$table$bonferroni <- p.adjust(talc_across_estrogen$table$PValue, method = "bonferroni")
+titanium_across_estrogen$table$bonferroni <-p.adjust(titanium_across_estrogen$table$PValue, method = "bonferroni")
+
+talc_within_estrogen$table$bonferroni <- p.adjust(talc_within_estrogen$table$PValue, method = "bonferroni")
+titanium_within_estrogen$table$bonferroni <- p.adjust(titanium_within_estrogen$table$PValue, method = "bonferroni")
+
+talc_within_noestrogen$table$bonferroni <- p.adjust(talc_within_noestrogen$table$PValue, method = "bonferroni")
+titanium_within_noestrogen$table$bonferroni <- p.adjust(titanium_within_noestrogen$table$PValue, method = "bonferroni")
+
+talc_within_estrogen_VS_talc_within_no_estrogen$table$bonferroni <- p.adjust(talc_within_estrogen_VS_talc_within_no_estrogen$table$PValue, method = "bonferroni")
+titanium_within_estrogen_VS_titanium_within_no_estrogen$table$bonferroni <- p.adjust(titanium_within_estrogen_VS_titanium_within_no_estrogen$table$PValue, method = "bonferroni")
+```
+
+#make some results tables of estrogen effects, filter based on the results of the LRT
+```{r}
+nothing_across_estrogen_results <- data.frame(nothing_across_estrogen$table) %>% tibble::rownames_to_column(var = 'loci')
+#add counts
+nothing_across_estrogen_results <- left_join(nothing_across_estrogen_results, counts_and_genes, by = 'loci')
+#filter based on LRT
+nothing_across_estrogen_results_additive <- semi_join(nothing_across_estrogen_results, additive_loci, by = 'loci') %>% dplyr::filter(PValue < 0.02)
+nrow(nothing_across_estrogen_results_additive)
+
+talc_across_estrogen_results <- data.frame(talc_across_estrogen$table) %>% tibble::rownames_to_column(var = 'loci')
+#add counts
+talc_across_estrogen_results <- left_join(talc_across_estrogen_results, counts_and_genes, by = 'loci')
+#filter based on LRT
+talc_across_estrogen_results_additive <- semi_join(talc_across_estrogen_results, additive_loci, by = 'loci') %>% dplyr::filter(PValue < 0.02)
+nrow(talc_across_estrogen_results_additive)
+
+
+titanium_across_estrogen_results <- data.frame(titanium_across_estrogen$table) %>% tibble::rownames_to_column(var = 'loci')
+#add counts
+titanium_across_estrogen_results <- left_join(titanium_across_estrogen_results, counts_and_genes, by = 'loci')
+#filter based on LRT
+titanium_across_estrogen_results_additive <- semi_join(titanium_across_estrogen_results, additive_loci, by = 'loci') %>% dplyr::filter(PValue < 0.02)
+nrow(titanium_across_estrogen_results_additive)
+
+```
+
+
+#make some results tables of talc or titanium within estrogen or within noestrogen effects, filter based on the results of the LRT
+
+```{r}
+talc_within_estrogen_results <- data.frame(talc_within_estrogen$table) %>% tibble::rownames_to_column(var = 'loci')
+#add counts
+talc_within_estrogen_results <- left_join(talc_within_estrogen_results, counts_and_genes, by = 'loci')
+#filter based on LRT
+talc_within_estrogen_results_additive <- semi_join(talc_within_estrogen_results, additive_loci, by = 'loci') %>% dplyr::filter(PValue < 0.02)
+nrow(talc_within_estrogen_results_additive)
+
+titanium_within_estrogen_results <- data.frame(titanium_within_estrogen$table) %>% tibble::rownames_to_column(var = 'loci')
+#add counts
+titanium_within_estrogen_results <- left_join(titanium_within_estrogen_results, counts_and_genes, by = 'loci')
+#filter based on LRT
+titanium_within_estrogen_results_additive <- semi_join(titanium_within_estrogen_results, additive_loci, by = 'loci') %>% dplyr::filter(PValue < 0.02)
+nrow(titanium_within_estrogen_results_additive)
+
+
+
+talc_within_noestrogen_results <- data.frame(talc_within_noestrogen$table) %>% tibble::rownames_to_column(var = 'loci')
+#add counts
+talc_within_noestrogen_results <- left_join(talc_within_noestrogen_results, counts_and_genes, by = 'loci')
+#filter based on LRT
+talc_within_noestrogen_results_additive <- semi_join(talc_within_noestrogen_results, additive_loci, by = 'loci') %>% dplyr::filter(PValue < 0.02)
+nrow(talc_within_noestrogen_results_additive)
+
+titanium_within_noestrogen_results <- data.frame(titanium_within_noestrogen$table) %>% tibble::rownames_to_column(var = 'loci')
+#add counts
+titanium_within_noestrogen_results <- left_join(titanium_within_noestrogen_results, counts_and_genes, by = 'loci')
+#filter based on LRT
+titanium_within_noestrogen_results_additive <- semi_join(titanium_within_noestrogen_results, additive_loci, by = 'loci') %>% dplyr::filter(PValue < 0.02)
+nrow(titanium_within_noestrogen_results_additive)
+```
+
+#make some results tables of talc or titanium effects when we expect they are doing different things in estrogen or no estrogen, filter based on the results of the LRT
+
+```{r}
+talc_within_estrogen_VS_talc_within_no_estrogen_results <- data.frame(talc_within_estrogen_VS_talc_within_no_estrogen$table) %>% tibble::rownames_to_column(var = 'loci')
+#add counts
+talc_within_estrogen_VS_talc_within_no_estrogen_results <- left_join(talc_within_estrogen_VS_talc_within_no_estrogen_results, counts_and_genes, by = 'loci')
+#filter based on LRT
+talc_within_estrogen_VS_talc_within_no_estrogen_results_interaction <- semi_join(talc_within_estrogen_VS_talc_within_no_estrogen_results, interaction_loci, by = 'loci') %>% dplyr::filter(PValue < 0.02)
+nrow(talc_within_estrogen_VS_talc_within_no_estrogen_results_interaction)
+```
+
+```{r}
+titanium_within_estrogen_VS_titanium_within_no_estrogen_results <- data.frame(titanium_within_estrogen_VS_titanium_within_no_estrogen$table) %>% tibble::rownames_to_column(var = 'loci')
+#add counts
+titanium_within_estrogen_VS_titanium_within_no_estrogen_results <- left_join(titanium_within_estrogen_VS_titanium_within_no_estrogen_results, counts_and_genes, by = 'loci')
+#filter based on LRT
+titanium_within_estrogen_VS_titanium_within_no_estrogen_results_interaction <- semi_join(titanium_within_estrogen_VS_titanium_within_no_estrogen_results, interaction_loci, by = 'loci') %>% dplyr::filter(PValue < 0.02)
+nrow(titanium_within_estrogen_VS_titanium_within_no_estrogen_results_interaction)
+```
+
+```{r}
+nothing_across_estrogen_results_additive <- nothing_across_estrogen_results_additive %>% dplyr::arrange(Distance) %>% dplyr::filter(Distance < 5000 & Distance > -5000) #1508
+talc_across_estrogen_results_additive <- talc_across_estrogen_results_additive %>% dplyr::arrange(Distance) %>% dplyr::filter(Distance < 5000 & Distance > -5000) #1192
+titanium_across_estrogen_results_additive <- titanium_across_estrogen_results_additive %>% dplyr::arrange(Distance) %>% dplyr::filter(Distance < 5000 & Distance > -5000) #1767
+
+talc_within_estrogen_results_additive <- talc_within_estrogen_results_additive %>% dplyr::arrange(Distance) %>% dplyr::filter(Distance < 5000 & Distance > -5000) #1371
+talc_within_noestrogen_results_additive  <- talc_within_noestrogen_results_additive %>% dplyr::arrange(Distance) %>% dplyr::filter(Distance < 5000 & Distance > -5000) #1519
+
+titanium_within_estrogen_results_additive <- titanium_within_estrogen_results_additive %>% dplyr::arrange(Distance) %>% dplyr::filter(Distance < 5000 & Distance > -5000) #1517
+titanium_within_noestrogen_results_additive  <- titanium_within_noestrogen_results_additive %>% dplyr::arrange(Distance) %>% dplyr::filter(Distance < 5000 & Distance > -5000) #2118
+
+talc_within_estrogen_VS_talc_within_no_estrogen_results_interaction <- talc_within_estrogen_VS_talc_within_no_estrogen_results_interaction  %>% dplyr::arrange(Distance) %>% dplyr::filter(Distance < 5000 & Distance > -5000) #935
+titanium_within_estrogen_VS_titanium_within_no_estrogen_results_interaction <- titanium_within_estrogen_VS_titanium_within_no_estrogen_results_interaction %>% dplyr::arrange(Distance) %>% dplyr::filter(Distance < 5000 & Distance > -5000) #1072
+
+```
+
+```{r}
+nrow(nothing_across_estrogen_results_additive)
+nrow(talc_across_estrogen_results_additive)
+nrow(titanium_across_estrogen_results_additive)
+
+nrow(talc_within_estrogen_results_additive)
+nrow(talc_within_noestrogen_results_additive)
+
+nrow(titanium_within_estrogen_results_additive)
+nrow(titanium_within_noestrogen_results_additive)
+
+nrow(talc_within_estrogen_VS_talc_within_no_estrogen_results_interaction)
+nrow(titanium_within_estrogen_VS_titanium_within_no_estrogen_results_interaction)
+
+```
+
+```{r}
+#write a test output sheet to check logfc, etc.
+write.table(nothing_across_estrogen_results_additive, '~/nothing_across_estrogen_results_additive.txt', row.names = F)
+```
+
+```{r}
+#make a list of sheets..
+sheet_list <- list(
+  #'Est in negative control' = nothing_across_estrogen_results_additive,
+  #'Est in talc' = talc_across_estrogen_results_additive,
+  #'Est in titanium' = titanium_across_estrogen_results_additive,
+  'Talc vs control in Est' = talc_within_estrogen_results_additive,
+  'Titanium vs control in Est' = titanium_within_estrogen_results_additive,
+  'Talc vs control in NoEst' = talc_within_noestrogen_results_additive,
+  'Titanium vs control in NoEst' = titanium_within_noestrogen_results_additive,
+  'Talc in Est vs Talc in NoEst' = talc_within_estrogen_VS_talc_within_no_estrogen_results_interaction,
+  'Titanium in Est vs Titanium in NoEst' = titanium_within_estrogen_VS_titanium_within_no_estrogen_results_interaction)
+``` 
+```{r}
+openxlsx::write.xlsx(sheet_list, file = 'DML_stats.xlsx')
+```
+```{r}
+nrow(talc_within_estrogen_results_additive)
+nrow(talc_within_noestrogen_results_additive)
+nrow(talc_within_estrogen_VS_talc_within_no_estrogen_results_interaction)
+```
+
+```{r}
+nrow(inner_join(talc_within_estrogen_results_additive, talc_within_noestrogen_results_additive, by = 'loci'))
+nrow(inner_join(talc_within_estrogen_results_additive, talc_within_estrogen_VS_talc_within_no_estrogen_results_interaction, by = 'loci'))
+nrow(inner_join(talc_within_noestrogen_results_additive, talc_within_estrogen_VS_talc_within_no_estrogen_results_interaction, by = 'loci'))
+
+```
+```{r}
+head(semi_join(talc_within_estrogen_results_additive, talc_within_noestrogen_results_additive, by = 'loci'))
+```
+
+
+```{r}
+#import the RNAseq file:
+rnaseq_data <- read.table('filt20_annot_LIMMA_TEvsVeh_005_Metacoreinput_AVG.txt', sep = '\t', header = T)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+#turn rowname into loci column:
+
+nothing_across_estrogen_table <- tibble::rownames_to_column(as.data.frame(nothing_across_estrogen$table), var = 'loci') 
+talc_across_estrogen_table <- tibble::rownames_to_column(as.data.frame(talc_across_estrogen$table), var = 'loci') 
+titanium_across_estrogen_table <- tibble::rownames_to_column(as.data.frame(titanium_across_estrogen$table), var = 'loci') 
+
+# if i filter to remove the interaction loci, the talc results should be similar and the titanium results should be similar.
+talc_within_estrogen_table <- tibble::rownames_to_column(as.data.frame(talc_within_estrogen$table), var = 'loci') 
+talc_within_noestrogen_table <- tibble::rownames_to_column(as.data.frame(talc_within_noestrogen$table), var = 'loci') 
+
+titanium_within_estrogen_table <- tibble::rownames_to_column(as.data.frame(titanium_within_estrogen$table), var = 'loci') 
+titanium_within_noestrogen_table <- tibble::rownames_to_column(as.data.frame(titanium_within_noestrogen$table), var = 'loci') 
+
+
+
+talc_within_estrogen_VS_talc_within_no_estrogen_table <- tibble::rownames_to_column(as.data.frame(talc_within_estrogen_VS_talc_within_no_estrogen$table), var = 'loci')
+titanium_within_estrogen_VS_titanium_within_no_estrogen_table <- tibble::rownames_to_column(as.data.frame(titanium_within_estrogen_VS_titanium_within_no_estrogen$table), var = 'loci')
+```
+
+tibble::rownames_to_column(as.data.frame(talc_within_estrogen_VS_talc_within_no_estrogen$table), var = 'loci')
+```{r}
+talc_across_estrogen_table$bonferroni <- p.adjust(talc_across_estrogen_table$PValue, method = "bonferroni")
+talc_across_estrogen_table$BH <- p.adjust(talc_across_estrogen_table$PValue, method = "BH")
+```
+
+
+#test some things..
+```{r}
+talc_across_estrogen_results <- dplyr::semi_join(talc_across_estrogen_table, additive_loci, by = 'loci') %>% dplyr::filter(PValue < 0.05) #4610 rows before pvalue filtering, 1832 after.
+talc_across_estrogen_results_counts <- dplyr::left_join(talc_across_estrogen_results, counts_and_genes, by = 'loci')
+write.table(talc_across_estrogen_results_counts, '~/talc_across_estrogen_results_counts.txt', row.names = F)
+
+```
+
+
+
+
+```{r}
+#https://stat.ethz.ch/pipermail/bioconductor/2012-March/044637.html
+#based on this thread, and the edgeR docs (https://www.bioconductor.org/packages/release/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf -- section 3.3.1, 3.3.2, 3.3.4 -- especially 3.3.4) the first few coefs after the intercept are looking at affects of additive and hormone treatments relative to their reference level, so:
+
+
+#hormoneestrogen = no estrogen vs estrogen in no additive (none.estrogen - none.noestrogen)
+#additivetalc = no additive vs talc in no estrogen (talc.noestrogen - none.noestrogen)
+#additivetitanium = no additive vs titanium in no estrogen (titanium.noestrogen - none.noestrogen)
+
+#hormoneestrogen:additivetalc = ( talc.estrogen - none.estrogen ) - ( talc.noestrogen - none.noestrogen )
+#hormoneestrogen:additivetitanium =   ( titanium.estrogen - none.estrogen ) - ( titanium.noestrogen - none.noestrogen )
+
+
+#then, if we contrast (additivetalc and additivetalc:hormoneestrogenm the (talc.noestrogen - none.noestrogen) effect sort of cancels out, this is how we get: ( talc.estrogen - none.estrogen ) 
+#then, if we contrast (additivetitanium and additivetitanium:hormoneestrogenm the (titanium.noestrogen - none.noestrogen) effect sort of cancels out, this is how we get: ( titanium.estrogen - none.estrogen ) 
+
+#contrast = c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-1,0,1,0)
+#contrast = c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-1,0,1)
+
+
+#https://stat.ethz.ch/pipermail/bioconductor/2013-December/056584.html
+#this link makes it sounds like if i want to test for overall talc and titanium effects, I need to fit an additive model.
+```
+```{r}
 colnames(full_fit_mm$coefficients)
-# `additivetalc and additivetitanium are the talc and titanium effects -- I think they more like the talc affect across both estrogen and noestrogen samples, rather than looking at the talc and titanium effects at the 'reference' level for estrogen factor (e.g., no estrogen)
-#hormoneestrogen is the estrogen effect -- e.g. comparing all estrogen vs no estrogen samples, regardless of additive
-#additivetalc:hormoneestrogen is basically the differences of differences -- so (talc:estrogen - nothing:estrogen) - (talc:noestrogen - vehicle:noestrogen)
-#additivetitanium:hormoneestrogen is similar -- (titanium:estrogen - nothing:estrogen) - (titanium:noestrogen - vehicle:noestrogen)
+
 ```
 
 ```{r}
 #first - where do the interactions matter?
-lrt_interaction_mm <- glmLRT(full_fit_mm, coef = c('additivetalc:hormoneestrogen', 'additivetitanium:hormoneestrogen'))
-                             #filter based on p-value, don't bother w test correction for now, cut off at .001 - table(lrt_interaction_mm$table$PValue > 0.01)
+lrt_interactions_mm <- glmLRT(full_fit_mm, coef = c(23, 24))
+
+#make a group column and follow 3.3.1
+
+When you run either test (glmLRT for where interactions matter, and wald/glmQLFTest for specific 2-group 3-comparisons)
+
+
+
+#can use the LRT in situations where its additive
+
+#so, the p-values that are reported are for the LRT across all levels, the LFC is for the specific contrast...
+
+
+lrt_talc_no_estrogen_mm <- glmLRT(full_fit_mm, coef = 21) #no additive vs talc in no estrogen (talc.noestrogen - none.noestrogen)
+lrt_titanium_no_estrogen_mm <- glmLRT(full_fit_mm, coef = 22) #no additive vs titanium in no estrogen (titanium.noestrogen - none.noestrogen)
+#coef 23 - 
+
+
+lrt_talc_estrogen_mm  <- glmLRT(full_fit_mm, contrast = c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-1,0,1,0)) #no additive vs talc in estrogen  -- 
+#basically: - (talc.noestrogen - none.noestrogen) + ( talc.estrogen - none.estrogen ) - ( talc.noestrogen - none.noestrogen ) 
+
+lrt_titanium_estrogen_mm <- glmLRT(full_fit_mm, contrast = c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-1,0,1)) #no additive vs titanium in estrogen (titanium.noestrogen - none.noestrogen)
+#basically: - (titanium.noestrogen - none.noestrogen) + ( titanium.estrogen - none.estrogen ) - ( titanium.noestrogen - none.noestrogen ) 
+
+
+talc_overall <- makeContrasts(talc_overall = (additivetalc + (hormoneestrogen.additivetalc - additivetalc)), levels = make.names(colnames(full_fit_mm$design)))
+titanium_overall <- makeContrasts(titanium_overall = (additivetitanium + (hormoneestrogen.additivetitanium - additivetitanium)), levels = make.names(colnames(full_fit_mm$design)))
+
+
+controls_contrast <- makeContrasts(vehicle_vs_nothing = (additivevehicle - (hormoneestrogen - additivetalc - additivetitanium)), levels = make.names(colnames(design_2)))
+
+```
+
+```{r}
+interactions_sig <- dplyr::filter(data.frame(lrt_interactions_mm$table), PValue < 0.05) %>% tibble::rownames_to_column(var = 'loci')
+talc_no_estrogen_sig <- dplyr::filter(data.frame(lrt_talc_no_estrogen_mm$table), PValue < 0.05) %>% tibble::rownames_to_column(var = 'loci')
+titanium_no_estrogen_sig <- dplyr::filter(data.frame(lrt_titanium_no_estrogen_mm$table), PValue < 0.05) %>% tibble::rownames_to_column(var = 'loci')
+talc_estrogen_sig <- dplyr::filter(data.frame(lrt_talc_estrogen_mm$table), PValue < 0.05) %>% tibble::rownames_to_column(var = 'loci')
+titanium_estrogen_sig <- dplyr::filter(data.frame(lrt_titanium_estrogen_mm$table), PValue < 0.05) %>% tibble::rownames_to_column(var = 'loci')
+```
+
+```{r}
+talc_no_estrogen_sig_interactions <- dplyr::semi_join(talc_no_estrogen_sig, interactions_sig, by = 'loci') # return all rows from x with a match in y. #1382
+nrow(talc_no_estrogen_sig_interactions)
+talc_no_estrogen_sig_additive <- dplyr::anti_join(talc_no_estrogen_sig, interactions_sig, by = 'loci') # return all rows from x without a match in y. #2334
+nrow(talc_no_estrogen_sig_additive)
+```
+
+```{r}
+titanium_no_estrogen_sig_interactions <- dplyr::semi_join(titanium_no_estrogen_sig, interactions_sig, by = 'loci') # return all rows from x with a match in y. #1714
+nrow(titanium_no_estrogen_sig_interactions)
+titanium_no_estrogen_sig_additive <- dplyr::anti_join(titanium_no_estrogen_sig, interactions_sig, by = 'loci') # return all rows from x without a match in y. #3222
+nrow(titanium_no_estrogen_sig_additive)
+
+```
+
+```{r}
+talc_estrogen_sig_interactions <- dplyr::semi_join(talc_estrogen_sig, interactions_sig, by = 'loci') # return all rows from x with a match in y. #2187
+nrow(talc_estrogen_sig_interactions)
+talc_estrogen_sig_additive <- dplyr::anti_join(talc_estrogen_sig, interactions_sig, by = 'loci') # return all rows from x without a match in y. #1445
+nrow(talc_estrogen_sig_additive)
+```
+
+```{r}
+titanium_estrogen_sig_interactions <- dplyr::semi_join(titanium_estrogen_sig, interactions_sig, by = 'loci') # return all rows from x with a match in y. #2629
+nrow(titanium_estrogen_sig_interactions)
+
+titanium_estrogen_sig_additive <- dplyr::anti_join(titanium_estrogen_sig, interactions_sig, by = 'loci') # return all rows from x without a match in y. #1958
+nrow(titanium_estrogen_sig_additive)
+```
+
+
+```{r}
+#make a melted counts table and drop all of the unmethylated data..
+counts_genes_table <- left_join(
+  tibble::rownames_to_column(data.frame(y$counts), var = 'rowname'), 
+  tibble::rownames_to_column(data.frame(y$genes), var = 'rowname')) %>%
+  melt(id.vars = c('rowname','Chr','Locus', 'EntrezID', 'Symbol', 'Strand', 'Distance', 'Width')) %>%
+  filter(grepl(pattern ="*.Me", variable))
+```
+```{r}
+counts_genes_table <- dcast(counts_genes_table, rowname + Chr + Locus + EntrezID + Symbol + Strand + Distance + Width ~ variable)
+```
+
+```{r}
+#lets look at some additive genes 
+talc_no_estrogen_sig_additive_counts <- left_join(talc_no_estrogen_sig_additive, counts_genes_table, by = c('loci' = 'rowname')) 
+
+
+#%>% melt(id.vars = c('loci', 'logFC', 'logCPM', 'LR', 'PValue', 'Chr','Locus', 'EntrezID', 'Symbol', 'Strand', 'Distance', 'Width')) 
+```
+
+```{r}
+talc_no_estrogen_sig_additive_counts$noestrogen_none_mean <- (talc_no_estrogen_sig_additive_counts$'X1.Me' + talc_no_estrogen_sig_additive_counts$'X2.Me' + talc_no_estrogen_sig_additive_counts$'X3.Me') / 3
+talc_no_estrogen_sig_additive_counts$noestrogen_talc_mean <- (talc_no_estrogen_sig_additive_counts$'X7.Me' + talc_no_estrogen_sig_additive_counts$'X8.Me' + talc_no_estrogen_sig_additive_counts$'X9.Me') / 3
+talc_no_estrogen_sig_additive_counts$logfc_estimate <- log2(talc_no_estrogen_sig_additive_counts$noestrogen_none_mean / talc_no_estrogen_sig_additive_counts$noestrogen_talc_mean)
+
+
+#ggplot(talc_no_estrogen_sig_additive_counts, aes(x = variable, y = value)) + geom_boxplot()
+```
+
+
+
+#filter based on p-value, don't bother w test correction for now, cut off at .01 - table(lrt_interaction_mm$table$PValue > 0.01)
 
 table(lrt_interaction_mm$table$PValue > 0.01) #using a more stringent nominal p-value cutoff, we can see for ~40K loci an additive model is a better fit, while ~1300 loci have an interaction betw. hormone and additive.
-
-#add some adjusted p-values
-lrt_interaction_mm$table$BH <- p.adjust(lrt_interaction_mm$table$PValue, method = "BH")
-lrt_interaction_mm$table$bonferroni <- p.adjust(lrt_interaction_mm$table$PValue, method = "bonferroni")
-
+```
+```{r}
 # second - run a contrast comparing talc and titanium effects across hormone
 lrt_talc <- glmLRT(full_fit_mm, coef = "additivetalc")
+lrt_talc_2 <- glmLRT(full_fit_mm, contrast = c("additive", "talc", "none"))
+
+colnames(coefficients(full_fit_mm))
+```
+
+```{r}
+talc_test_1 <-  glmLRT(full_fit_mm, coef = "additivetalc")
+talc_test_5 <-  glmLRT(full_fit_mm, contrast = c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0)) #this  return the most genes as 'true'
+
+#test_3 seems d efinitely not right..
+#1-5170586 is in test 4
+#1-9545708 is in test 1... 
+
+```
+
+```{r}
+table(talc_test_1$table$PValue < 0.01)  
+table(talc_test_2$table$PValue < 0.01)  
+table(talc_test_3$table$PValue < 0.01)  
+table(talc_test_4$table$PValue < 0.01)  
+table(talc_test_5$table$PValue < 0.01)  
+
+```
+
+```{r}
+test_4_sorted <- arrange(data.frame(talc_test_4$table), desc(PValue))
+test_3_sorted <- arrange(data.frame(talc_test_3$table), desc(PValue))
+test_1_sorted <- arrange(data.frame(talc_test_1$table), desc(PValue))
+test_5_sorted <- arrange(data.frame(talc_test_5$table), desc(PValue))
+```
+```{r}
+test_5_filt <- data.frame(talc_test_5$table) %>% dplyr::filter(PValue < 0.01)
+```
+```{r}
+#lets look at the counts for 1-3214534...
+
+per_gene_counts <- left_join(tibble::rownames_to_column(data.frame(y$counts), var = 'rowname'), tibble::rownames_to_column(data.frame(y$genes), var = 'rowname')) 
+per_gene_counts_Me <- select(per_gene_counts, -contains(".Un"))
+
+per_gene_counts_melted <- melt(per_gene_counts_Me, id.vars = c('rowname','Chr','Locus', 'EntrezID', 'Symbol', 'Strand', 'Distance', 'Width'))
+```
+
+```{r}
+
+
+per_gene_counts_melted_filt <- per_gene_counts_melted %>% dplyr::filter(rowname == '1-5170517')
+plot <- ggplot(data = per_gene_counts_melted_filt, aes(x = variable, y = value)) + geom_bar(stat = 'identity') + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+plot
+```
+
+```{r}
+contrast.matrix <- makeContrasts('hormoneestrogen', 'additivetalc', 'additivetitanium', 'hormoneestrogen.additivetalc', 'hormoneestrogen.additivetitanium', levels=make.names(full_fit_mm$design))
+
+
+contrast.matrix <- makeContrasts(AML1,CBFb,AML1.CBFb,AML1.CBFb-AML1,AML1.CBFb-CBFb, levels=design)
+
+(hormoneestrogen, additivetalc, additivetitanium, hormoneestrogen.additivetalc, hormoneestrogen.additivetitanium)
+```
+> contrast.matrix
+AML1 CBFb AML1.CBFb AML1.CBFb - AML1 AML1.CBFb - CBFb
+AML1 1 0 0 -1 0
+AML1.CBFb 0 0 1 1 1
+CBFb 0 1 0 0 -1
+The linear model fit can now be expanded and empirical Bayes statistics computed:
+> fit2 <- contrasts.fit(fit, contrasts.matrix)
+
+
+
 lrt_titanium <- glmLRT(full_fit_mm, coef = "additivetitanium")
 
 lrt_talc$table$BH <- p.adjust(lrt_talc$table$PValue, method = "BH")
@@ -125,15 +784,77 @@ lrt_titanium$table$bonferroni <- p.adjust(lrt_titanium$table$PValue, method = "b
 additive_genes <- lrt_interaction_mm[lrt_interaction_mm$table$PValue > 0.01,]
 #loci where interactions are important
 interaction_genes <- lrt_interaction_mm[lrt_interaction_mm$table$PValue < 0.01,]
+```
 
+> nrow(talc_effect$table)
+[1] 45057
+> nrow(additive_genes$table)
+[1] 43704
+
+
+nrow(lrt_talc[!rownames(lrt_talc$genes) %in% rownames(interaction_genes$genes),])
+
+nrow(lrt_talc[!rownames(interaction_genes$genes) %in% rownames(lrt_talc$genes),])
+
+
+```{r}
 #filter so only genes with additive effect are included in the 'main' effects tables...
-talc_effect <- lrt_talc[rownames(lrt_talc$genes) %in% rownames(additive_genes$genes),]
-titanium_effect <- lrt_titanium[rownames(lrt_titanium$genes) %in% rownames(additive_genes$genes),]
+talc_additive_effect <- lrt_talc[!rownames(lrt_talc$genes) %in% rownames(interaction_genes$genes),]
+titanium_additive_effect <- lrt_talc[!rownames(lrt_titanium$genes) %in% rownames(interaction_genes$genes),]
+
+
+#make an output table..
+talc_output <- left_join(
+  tibble::rownames_to_column(talc_additive_effect$table, var = 'rowname'), 
+  tibble::rownames_to_column(talc_additive_effect$genes, var = 'rowname')) 
+
+titanium_output <- left_join(
+  tibble::rownames_to_column(titanium_additive_effect$table, var = 'rowname'), 
+  tibble::rownames_to_column(titanium_additive_effect$genes, var = 'rowname'))
+
+# add the counts to the outputs..
+talc_output_counts <- left_join(
+  talc_output,
+  tibble::rownames_to_column(as.data.frame(y$counts), var = 'rowname')) 
+
+titanium_output_counts <- left_join(
+  titanium_output,
+  tibble::rownames_to_column(as.data.frame(y$counts), var = 'rowname')) 
+
+```
+
+```{r}
+# the talc_effect table should be the 'talc' main effect. Look at the logFC for these genes in this table -- confirm that we are looking at 
+
+colnames(talc_output_counts)
+nrow(talc_output_counts)
+talc_additive_sig <- talc_output_counts %>% dplyr::filter(PValue < 0.05)
+nrow(talc_additive_sig)
+
+#talc samples are sample 7-12
+#control samples are samples 1-6
+
+
+talc_additive_sig$talc_methylated_mean <- (talc_additive_sig$'7-Me' + talc_additive_sig$'8-Me' + talc_additive_sig$'9-Me' + talc_additive_sig$'10-Me'  + talc_additive_sig$'11-Me' + talc_additive_sig$'12-Me') / 6
+
+talc_additive_sig$control_methylated_mean <- (talc_additive_sig$'1-Me' + talc_additive_sig$'2-Me' + talc_additive_sig$'3-Me' + talc_additive_sig$'4-Me'  + talc_additive_sig$'5-Me' + talc_additive_sig$'6-Me') / 6
+
+talc_additive_sig$talc_control_logFC <- log2(talc_additive_sig$control_methylated_mean / talc_additive_sig$talc_methylated_mean)
+
+talc_additive_sig$talc_control_logFC <- log2(talc_additive_sig$talc_methylated_mean / talc_additive_sig$control_methylated_mean)
+
+```
+"geometric.mean" <- 
+function(x,na.rm=TRUE)
+{ 
+exp(mean(log(x),na.rm=na.rm)) }
+```
+
 
 
 #what about the interactions?
-lrt_talc_interaction <- glmLRT(full_fit_mm, coef = "additivetalc:hormoneestrogen")
-lrt_titanium_interaction <- glmLRT(full_fit_mm, coef = "additivetitanium:hormoneestrogen")
+lrt_talc_interaction <- glmLRT(full_fit_mm, coef = "hormoneestrogen:additivetalc")
+lrt_titanium_interaction <- glmLRT(full_fit_mm, coef = "hormoneestrogen:additivetitanium")
 
 #add adjusted p-values...
 lrt_talc_interaction$table$BH <- p.adjust(lrt_talc_interaction$table$PValue, method = "BH")
@@ -154,14 +875,11 @@ nrow(titanium_effect$genes)
 nrow(interaction_genes$genes)
 nrow(talc_effect_interaction$genes)
 nrow(titanium_effect_interaction$genes)
+```
 
-talc_output <- left_join(
-  tibble::rownames_to_column(talc_effect$table, var = 'rowname'), 
-  tibble::rownames_to_column(talc_effect$genes, var = 'rowname')) 
+#make some output tables
+```{r}
 
-titanium_output <- left_join(
-  tibble::rownames_to_column(titanium_effect$table, var = 'rowname'), 
-  tibble::rownames_to_column(titanium_effect$genes, var = 'rowname'))
 
 talc_output_interaction <- left_join(
   tibble::rownames_to_column(talc_effect_interaction$table, var = 'rowname'), 
@@ -172,13 +890,6 @@ titanium_output_interaction <- left_join(
   tibble::rownames_to_column(titanium_effect_interaction$genes, var = 'rowname'))
 
 #add the counts data to get relative methylation heatmaps...
-talc_output_counts <- left_join(
-  talc_output,
-  tibble::rownames_to_column(as.data.frame(y$counts), var = 'rowname')) 
-
-titanium_output_counts <- left_join(
-  titanium_output,
-  tibble::rownames_to_column(as.data.frame(y$counts), var = 'rowname')) 
 
 talc_output_interaction_counts <- left_join(
   talc_output_interaction,
@@ -187,54 +898,145 @@ talc_output_interaction_counts <- left_join(
 titanium_output_interaction_counts <- left_join(
   titanium_output_interaction,
   tibble::rownames_to_column(as.data.frame(y$counts), var = 'rowname')) 
+```
 
+```{r}
 #look at the results...
 table(titanium_output_counts$PValue < 0.01) #1137 DML in titanium
 table(talc_output_counts$PValue < 0.01) #767 DML in talc
 
 table(titanium_output_interaction_counts$PValue < 0.01) #724 DML in titanium accounting for estrogen
 table(talc_output_interaction_counts$PValue < 0.01) #565 DML in talc accounting for estrogen
+
+#distance to tss - whats the right cutoff? 5 kb upstream and see where that gets us, then thru to the end of gene body (unless its 5kb upsteam of something else)
+
+#add a proportion of methylation column for each sample per gene
+
+#have the table of DE genes from the talc/estrogen effect -- look at the gene IDs or gene symbols and compare them to the interaction effect DMLs and see which gene symbols are in both lists.
+
 ```
-
-
-##############################
-# look at vehicle vs none -- is there a difference betw these two controls? 
-##############################
 
 
 ```{r}
+ggplot(titanium_output_counts, aes(x=logCPM, y=logFC)) + geom_point(aes(color = cut(PValue, c(-Inf, 0.01, Inf)))) + scale_color_manual(name = "PValue", values = c("(-Inf,0.01]" = "red", "(0.01, Inf]" = "black")) + labs(title = 'Titanium main effects')
 
-targets$additive <- relevel(as.factor(targets$additive), ref = 'nothing')
-targets$hormone <- relevel(as.factor(targets$hormone), ref = 'noestrogen')
+ggplot(talc_output_counts, aes(x=logCPM, y=logFC)) + geom_point(aes(color = cut(PValue, c(-Inf, 0.01, Inf)))) + scale_color_manual(name = "PValue", values = c("(-Inf,0.01]" = "red", "(0.01, Inf]" = "black")) + labs(title = 'Talc main effects')
 
-design_2 <- modelMatrixMeth(model.matrix(~ additive * hormone, data=targets))
+ggplot(titanium_output_interaction_counts, aes(x=logCPM, y=logFC)) + geom_point(aes(color = cut(PValue, c(-Inf, 0.01, Inf)))) + scale_color_manual(name = "PValue", values = c("(-Inf,0.01]" = "red", "(0.01, Inf]" = "black")) + labs(title = 'Titanium interaction')
 
-#control_disp <- estimateDisp(y, design=design_2, trend="none") #Design matrix not of full rank.
-
-design_2 <- design_2[, colnames(design_2) != "additivevehicle:hormoneestrogen"] # getting rid of the unestimable coefficients
-design_2 <- design_2[, colnames(design_2) != "additivetitanium:hormoneestrogen"] # getting rid of the unestimable coefficients
-control_disp <- estimateDisp(y, design=design_2, trend="none")
-control_fit <- glmFit(control_disp, design_2)
-```
-```{r}
-print(design_2[,19:24])
-```
-```{r}
-controls_contrast <- makeContrasts(vehicle_vs_nothing = (additivevehicle - (hormoneestrogen - additivetalc - additivetitanium)), levels = make.names(colnames(design_2)))
-controls_contrast
+ggplot(talc_output_interaction_counts, aes(x=logCPM, y=logFC)) + geom_point(aes(color = cut(PValue, c(-Inf, 0.01, Inf)))) + scale_color_manual(name = "PValue", values = c("(-Inf,0.01]" = "red", "(0.01, Inf]" = "black")) + labs(title = 'Talc interaction')
 ```
 
-#is this right?
 
 ```{r}
-
-controls_contrast_pr <- glmLRT(control_fit, contrast = controls_contrast)
-
-#when pvalue is less than a cutoff (.05 or whatever) these are the genes or loci where there's a difference betw the 'nothing' and 'vehicle' additive... 
-controls_contrast_pr$table$BH <- p.adjust(controls_contrast_pr$table$PValue, method = "BH")
-controls_contrast_pr$table$bonferroni <- p.adjust(controls_contrast_pr$table$PValue, method = "bonferroni")
-
-hist(controls_contrast_pr$table$PValue)
+write.table(talc_output_interaction_counts, './talc_output_interaction_counts.txt', row.names=F)
+write.table(titanium_output_interaction_counts, './titanium_output_interaction_counts.txt', row.names=F)
+write.table(titanium_output_counts, './titanium_output_counts.txt', row.names=F)
+write.table(talc_output_counts, './talc_output_counts.txt', row.names=F)
 ```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+#differential methylation per gene promoter:
+yall_pr <- yall
+InPromoter <- yall_pr$genes$Distance >= -1000 & yall_pr$genes$Distance <= 3000
+length(InPromoter == 'TRUE')
+yIP <- yall_pr[InPromoter,,keep.lib.sizes=FALSE]
+ypr <- rowsum(yIP, yIP$genes$EntrezID, reorder=FALSE)
+ypr$genes$EntrezID <- NULL
+Mepr <- ypr$counts[,Methylation=="Me"]
+Unpr <- ypr$counts[,Methylation=="Un"]
+Coveragepr <- Mepr + Unpr
+HasCoveragepr <- rowSums(Coveragepr >= 3) == 3
+HasBothpr <- rowSums(Mepr) > 0 & rowSums(Unpr) > 0
+ypr <- ypr[HasCoveragepr & HasBothpr,,keep.lib.sizes=FALSE]
+```
+
+```{r}
+TotalLibSizepr <- 0.5*ypr$samples$lib.size[Methylation=="Me"] + 0.5*ypr$samples$lib.size[Methylation=="Un"]
+ypr$samples$lib.size <- rep(TotalLibSizepr, each=2)
+
+ypr <- estimateDisp(ypr, design = design, trend="none")
+ypr_fit <- glmFit(ypr, design)
+
+#first - where do the interactions matter?
+ypr_fit_lrt <- glmLRT(ypr_fit, coef = c('hormoneestrogen:additivetalc', 'hormoneestrogen:additivetitanium'))
+
+table(ypr_fit_lrt$table$PValue > 0.05) #interaction matters when p-value is below cutoff -- so only in 4 genes.
+```
+
+```{r}
+# second - run a contrast comparing talc and titanium effects across hormone
+lrt_talc_ypr <- glmLRT(ypr_fit, coef = "additivetalc")
+lrt_titanium_ypr <- glmLRT(ypr_fit, coef = "additivetitanium")
+
+lrt_talc_ypr$table$BH <- p.adjust(lrt_talc_ypr$table$PValue, method = "BH")
+lrt_talc_ypr$table$bonferroni <- p.adjust(lrt_talc_ypr$table$PValue, method = "bonferroni")
+
+lrt_titanium_ypr$table$BH <- p.adjust(lrt_titanium_ypr$table$PValue, method = "BH")
+lrt_titanium_ypr$table$bonferroni <- p.adjust(lrt_titanium_ypr$table$PValue, method = "bonferroni")
+
+#loci where interactions are not as important
+additive_genes_ypr <- ypr_fit_lrt[ypr_fit_lrt$table$PValue > 0.05,]
+#loci where interactions are important
+interaction_genes_ypr <- ypr_fit_lrt[ypr_fit_lrt$table$PValue < 0.05,]
+
+#filter so only genes with additive effect are included in the 'main' effects tables...
+talc_effect_ypr <- lrt_talc_ypr[rownames(lrt_talc_ypr$genes) %in% rownames(additive_genes_ypr$genes),]
+titanium_effect_ypr <- lrt_titanium_ypr[rownames(lrt_titanium_ypr$genes) %in% rownames(additive_genes_ypr$genes),]
+
+#what about the interactions?
+lrt_talc_interaction_ypr <- glmLRT(ypr_fit, coef = "hormoneestrogen:additivetalc")
+lrt_titanium_interaction_ypr <- glmLRT(ypr_fit, coef = "hormoneestrogen:additivetitanium")
+
+#add adjusted p-values...
+lrt_talc_interaction_ypr$table$BH <- p.adjust(lrt_talc_interaction_ypr$table$PValue, method = "BH")
+lrt_talc_interaction_ypr$table$bonferroni <- p.adjust(lrt_talc_interaction_ypr$table$PValue, method = "bonferroni")
+
+lrt_titanium_interaction_ypr$table$BH <- p.adjust(lrt_titanium_interaction_ypr$table$PValue, method = "BH")
+lrt_titanium_interaction_ypr$table$bonferroni <- p.adjust(lrt_titanium_interaction_ypr$table$PValue, method = "bonferroni")
+
+#filter so only genes with interaction effects are included...
+talc_effect_interaction_ypr <- lrt_talc_interaction_ypr[rownames(lrt_talc_interaction_ypr$genes) %in% rownames(interaction_genes_ypr$genes),]
+titanium_effect_interaction_ypr <- lrt_titanium_interaction_ypr[rownames(lrt_titanium_interaction_ypr$genes) %in% rownames(interaction_genes_ypr$genes),]
+
+```
+
+```{r}
+#look at the results...
+table(titanium_effect_ypr$table$PValue < 0.05) #7 DM gene in titanium
+table(talc_effect_ypr$table$PValue < 0.05) #9 in talc
+
+table(titanium_effect_interaction_ypr$table$PValue < 0.05) #2 DM genes in titanium accounting for estrogen
+table(talc_effect_interaction_ypr$table$PValue < 0.05) #1 DM gene in talc accounting for estrogen
+```
+
 
 
